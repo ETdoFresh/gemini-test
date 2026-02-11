@@ -2,7 +2,11 @@ import "dotenv/config";
 import { readFile, writeFile, mkdir, stat } from "fs/promises";
 import { randomUUID } from "crypto";
 import path from "path";
+import { fileURLToPath } from "url";
 import { lookup } from "mime-types";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const ENV_PATH = path.join(__dirname, ".env");
 
 const GEMINI_URL = "https://gemini.google.com";
 
@@ -24,6 +28,43 @@ function getCookies() {
   return `__Secure-1PSID=${psid}; __Secure-1PSIDTS=${psidts}`;
 }
 
+// Update .env with refreshed cookie values from Set-Cookie headers
+async function refreshCookies(res) {
+  const setCookies = res.headers.getSetCookie?.() || [];
+  const updates = {};
+  for (const sc of setCookies) {
+    const match = sc.match(/^(__Secure-1PSID[A-Z]*)=([^;]+)/);
+    if (match) updates[match[1]] = match[2];
+  }
+  if (Object.keys(updates).length === 0) return null;
+
+  try {
+    let envContent = await readFile(ENV_PATH, "utf8");
+    let changed = false;
+    for (const [key, val] of Object.entries(updates)) {
+      const re = new RegExp(`^${key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}=.*$`, "m");
+      if (re.test(envContent)) {
+        envContent = envContent.replace(re, `${key}=${val}`);
+        changed = true;
+      } else {
+        envContent += `\n${key}=${val}`;
+        changed = true;
+      }
+      process.env[key] = val;
+    }
+    if (changed) {
+      await writeFile(ENV_PATH, envContent);
+      console.log(`  Auto-refreshed cookies: ${Object.keys(updates).join(", ")}`);
+    }
+    // Return updated cookie string
+    const psid = process.env["__Secure-1PSID"];
+    const psidts = process.env["__Secure-1PSIDTS"];
+    return `__Secure-1PSID=${psid}; __Secure-1PSIDTS=${psidts}`;
+  } catch {
+    return null;
+  }
+}
+
 // Fetch the Gemini page and extract session tokens from the HTML
 async function getSessionTokens(cookies) {
   console.log("Fetching Gemini page to extract session tokens...");
@@ -42,6 +83,9 @@ async function getSessionTokens(cookies) {
     );
     process.exit(1);
   }
+
+  // Auto-refresh cookies from Set-Cookie response headers
+  const refreshedCookies = await refreshCookies(res);
 
   const html = await res.text();
 
@@ -82,7 +126,7 @@ async function getSessionTokens(cookies) {
   console.log(`  Session ID: ${fSid}`);
   if (pushId) console.log(`  Push-ID: ${pushId}`);
 
-  return { at, bl, fSid, pushId, clientPctx };
+  return { at, bl, fSid, pushId, clientPctx, refreshedCookies };
 }
 
 // Upload an image via Google's resumable upload protocol (2-phase)
@@ -397,8 +441,10 @@ async function main() {
   }
   console.log();
 
-  const cookies = getCookies();
-  const { at, bl, fSid, pushId, clientPctx } = await getSessionTokens(cookies);
+  let cookies = getCookies();
+  const { at, bl, fSid, pushId, clientPctx, refreshedCookies } =
+    await getSessionTokens(cookies);
+  if (refreshedCookies) cookies = refreshedCookies;
   const clientUuid = randomUUID().toUpperCase();
   const reqId = Math.floor(100000 + Math.random() * 900000) * 100;
 
