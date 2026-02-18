@@ -63,7 +63,6 @@ body {
   overflow: hidden;
   background: #1a1a1a;
   cursor: pointer;
-  aspect-ratio: 1;
 }
 .tile img {
   width: 100%;
@@ -95,11 +94,35 @@ body {
   right: 0;
   background: #1a1a1a;
   border-top: 1px solid #2a2a2a;
-  padding: 14px 20px;
+  padding: 10px 20px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 10;
+}
+
+#options-row {
+  display: flex;
+  gap: 8px;
+}
+
+#options-row select {
+  background: #111;
+  border: 1px solid #333;
+  color: #aaa;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  cursor: pointer;
+  outline: none;
+}
+#options-row select:focus { border-color: #4a6cf7; color: #e0e0e0; }
+#options-row select option { background: #1a1a1a; }
+
+#input-row {
   display: flex;
   align-items: center;
   gap: 10px;
-  z-index: 10;
 }
 
 #file-btn {

@@ -9,10 +9,24 @@ const upload = multer({ storage: multer.memoryStorage() });
 
 // POST /api/generate — generate images
 router.post("/generate", upload.array("images", 10), async (req, res) => {
-  const prompt = req.body?.prompt;
-  if (!prompt) {
+  const rawPrompt = req.body?.prompt;
+  if (!rawPrompt) {
     return res.status(400).json({ error: "Missing 'prompt' field" });
   }
+
+  // Build prompt with image settings
+  const aspectRatio = req.body?.aspectRatio;
+  const resolution = req.body?.resolution;
+  const settings: string[] = [];
+  if (aspectRatio) settings.push(`Use a ${aspectRatio} aspect ratio`);
+  if (resolution === "2048") {
+    settings.push("Output the image at 2K resolution (2048×2048 pixels)");
+  } else if (resolution === "1024") {
+    settings.push("Output the image at 1K resolution (1024×1024 pixels)");
+  }
+  const prompt = settings.length > 0
+    ? `${rawPrompt}. ${settings.join(". ")}.`
+    : rawPrompt;
 
   // If no cookies in memory, try restoring from Chrome profile
   if (!hasCookies()) {
@@ -35,9 +49,10 @@ router.post("/generate", upload.array("images", 10), async (req, res) => {
 
     const result = await generateImages(prompt, imageBuffers);
 
-    // Download each image and return as base64
+    // Download only PNG images and return as base64
+    const pngImages = result.images.filter((img) => img.mime === "image/png");
     const images = [];
-    for (const img of result.images) {
+    for (const img of pngImages) {
       try {
         const buf = await downloadImageToBuffer(img.url);
         images.push({

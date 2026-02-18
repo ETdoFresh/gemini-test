@@ -11,6 +11,8 @@ const fileCount = document.getElementById("file-count")!;
 const authBanner = document.getElementById("auth-banner")!;
 const loginBtn = document.getElementById("login-btn")!;
 const toast = document.getElementById("toast")!;
+const aspectRatioSelect = document.getElementById("aspect-ratio") as HTMLSelectElement;
+const resolutionSelect = document.getElementById("resolution") as HTMLSelectElement;
 
 let generating = false;
 
@@ -73,7 +75,12 @@ async function handleGenerate() {
   submitBtn.innerHTML = '<div class="spinner"></div>';
 
   try {
-    const data = await generate(prompt, fileInput.files);
+    const data = await generate(
+      prompt,
+      fileInput.files,
+      aspectRatioSelect.value || undefined,
+      resolutionSelect.value || undefined
+    );
 
     if (!data.images || data.images.length === 0) {
       showToast("No images returned");

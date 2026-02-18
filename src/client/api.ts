@@ -31,10 +31,14 @@ export async function doLogin(): Promise<{ success?: boolean; error?: string }> 
 
 export async function generate(
   prompt: string,
-  files: FileList | null
+  files: FileList | null,
+  aspectRatio?: string,
+  resolution?: string
 ): Promise<GenerateResult> {
   const form = new FormData();
   form.append("prompt", prompt);
+  if (aspectRatio) form.append("aspectRatio", aspectRatio);
+  if (resolution) form.append("resolution", resolution);
   if (files) {
     for (const file of files) {
       form.append("images", file);

@@ -415,7 +415,7 @@ export async function generateImages(
   url.searchParams.set("_reqid", String(reqId));
   url.searchParams.set("rt", "c");
 
-  const modelId = "e051ce1aa80aa576";
+  const modelId = "9d8ca3786ebdfbea"; // Gemini 3.0 Pro
 
   const body = new URLSearchParams();
   body.set("f.req", buildRequestPayload(prompt, at, clientUuid, attachments));
@@ -429,7 +429,7 @@ export async function generateImages(
       "X-Same-Domain": "1",
       "x-goog-ext-73010989-jspb": "[0]",
       "x-goog-ext-525001261-jspb": JSON.stringify([
-        1, null, null, null, modelId, null, null, 0, [4], null, null, 2,
+        1, null, null, null, modelId, null, null, 0, [4], null, null, 1,
       ]),
       "x-goog-ext-525005358-jspb": JSON.stringify([clientUuid, 1]),
       Cookie: cookies,
