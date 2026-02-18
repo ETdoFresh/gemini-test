@@ -1,18 +1,43 @@
-import { readFile, writeFile, mkdir, stat } from "fs/promises";
+import { readFile, writeFile } from "fs/promises";
 import { randomUUID } from "crypto";
 import path from "path";
 import { lookup } from "mime-types";
-import {
-  getCookieString,
-  refreshCookiesFromResponse,
-} from "./cookies.js";
+import { getCookieString, refreshCookiesFromResponse } from "./cookies.js";
 
 const GEMINI_URL = "https://gemini.google.com";
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36";
 
+interface SessionTokens {
+  at: string;
+  bl: string;
+  fSid: string;
+  pushId: string | null;
+  clientPctx: string | null;
+}
+
+interface UploadedImage {
+  uploadPath: string;
+  fileName: string;
+  mimeType: string;
+}
+
+export interface ParsedImage {
+  url: string;
+  filename: string;
+  mime: string;
+  dimensions: number[] | null;
+}
+
+export interface ParsedResponse {
+  images: ParsedImage[];
+  conversationId: string | null;
+  responseId: string | null;
+  modelName: string | null;
+}
+
 // Fetch the Gemini page and extract session tokens from the HTML
-export async function getSessionTokens() {
+export async function getSessionTokens(): Promise<SessionTokens> {
   const cookies = getCookieString();
   console.log("Fetching Gemini page to extract session tokens...");
   const res = await fetch(`${GEMINI_URL}/app`, {
@@ -63,7 +88,11 @@ export async function getSessionTokens() {
 }
 
 // Upload an image from a file path
-export async function uploadImage(filePath, pushId, clientPctx) {
+export async function uploadImage(
+  filePath: string,
+  pushId: string | null,
+  clientPctx: string | null
+): Promise<UploadedImage> {
   const fileName = path.basename(filePath);
   const fileBuffer = await readFile(filePath);
   const mimeType = lookup(filePath) || "image/jpeg";
@@ -72,12 +101,12 @@ export async function uploadImage(filePath, pushId, clientPctx) {
 
 // Upload an image from an in-memory buffer
 export async function uploadImageBuffer(
-  buffer,
-  fileName,
-  mimeType,
-  pushId,
-  clientPctx
-) {
+  buffer: Buffer,
+  fileName: string,
+  mimeType: string,
+  pushId: string | null,
+  clientPctx: string | null
+): Promise<UploadedImage> {
   const cookies = getCookieString();
   const fileSize = buffer.length;
 
@@ -86,18 +115,18 @@ export async function uploadImageBuffer(
   );
 
   // Phase 1: Initiate upload
-  const initHeaders = {
+  const initHeaders: Record<string, string> = {
     "X-Goog-Upload-Protocol": "resumable",
     "X-Goog-Upload-Command": "start",
     "X-Goog-Upload-Header-Content-Length": String(fileSize),
     "X-Tenant-Id": "bard-storage",
-    "Push-ID": pushId,
     "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
     Cookie: cookies,
     "User-Agent": USER_AGENT,
     Origin: "https://gemini.google.com",
     Referer: "https://gemini.google.com/",
   };
+  if (pushId) initHeaders["Push-ID"] = pushId;
   if (clientPctx) initHeaders["X-Client-Pctx"] = clientPctx;
 
   const initRes = await fetch("https://push.clients6.google.com/upload/", {
@@ -131,7 +160,7 @@ export async function uploadImageBuffer(
       Origin: "https://gemini.google.com",
       Referer: "https://gemini.google.com/",
     },
-    body: buffer,
+    body: new Uint8Array(buffer),
   });
 
   if (!uploadRes.ok) {
@@ -145,12 +174,17 @@ export async function uploadImageBuffer(
 }
 
 // Build the f.req payload for StreamGenerate
-export function buildRequestPayload(prompt, at, clientUuid, attachments = []) {
+export function buildRequestPayload(
+  prompt: string,
+  at: string,
+  clientUuid: string,
+  attachments: UploadedImage[] = []
+): string {
   const now = Date.now();
   const seconds = Math.floor(now / 1000);
   const nanos = (now % 1000) * 1000000;
 
-  const inner = new Array(69).fill(null);
+  const inner: any[] = new Array(69).fill(null);
   const attachmentData =
     attachments.length > 0
       ? attachments.map((a) => [
@@ -185,20 +219,20 @@ export function buildRequestPayload(prompt, at, clientUuid, attachments = []) {
 }
 
 // Parse the streaming response to extract image URLs
-export function parseStreamResponse(responseText) {
+export function parseStreamResponse(responseText: string): ParsedResponse {
   const cleaned = responseText.replace(/^\)\]\}'\s*\n/, "");
   const lines = cleaned.split("\n").filter((l) => l.trim().length > 0);
 
-  const images = [];
-  let conversationId = null;
-  let responseId = null;
-  let modelName = null;
+  const images: ParsedImage[] = [];
+  let conversationId: string | null = null;
+  let responseId: string | null = null;
+  let modelName: string | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (/^\d+$/.test(line)) continue;
 
-    let outerChunk;
+    let outerChunk: any;
     try {
       outerChunk = JSON.parse(line);
     } catch {
@@ -225,7 +259,7 @@ export function parseStreamResponse(responseText) {
     const innerStr = outerChunk[0][2];
     if (!innerStr) continue;
 
-    let inner;
+    let inner: any;
     try {
       inner = JSON.parse(innerStr);
     } catch {
@@ -263,7 +297,7 @@ export function parseStreamResponse(responseText) {
       if (!Array.isArray(candidate) || !candidate[12]) continue;
 
       const imageContainer = candidate[12];
-      const allImageGroups = [];
+      const allImageGroups: any[] = [];
 
       if (Array.isArray(imageContainer[7]?.[0])) {
         allImageGroups.push(...imageContainer[7][0]);
@@ -286,7 +320,7 @@ export function parseStreamResponse(responseText) {
           const url = variant[3];
           const filename = variant[2] || "image";
           const mime = variant[11] || "image/png";
-          const dimensions = variant[15];
+          const dimensions = variant[15] || null;
 
           if (!images.find((img) => img.url === url)) {
             images.push({ url, filename, mime, dimensions });
@@ -300,8 +334,10 @@ export function parseStreamResponse(responseText) {
 }
 
 // Download an image to a file path
-export async function downloadImage(url, outputPath) {
-  const cookies = getCookieString();
+export async function downloadImage(
+  url: string,
+  outputPath: string
+): Promise<void> {
   console.log(`  Downloading ${path.basename(outputPath)}...`);
 
   const buffer = await downloadImageToBuffer(url);
@@ -312,17 +348,17 @@ export async function downloadImage(url, outputPath) {
 }
 
 // Download an image to an in-memory Buffer
-export async function downloadImageToBuffer(url) {
+export async function downloadImageToBuffer(url: string): Promise<Buffer> {
   const cookies = getCookieString();
 
-  const headers = {
+  const headers: Record<string, string> = {
     "User-Agent": USER_AGENT,
     Referer: "https://gemini.google.com/",
     Cookie: cookies,
   };
 
   let currentUrl = url;
-  let res;
+  let res!: Response;
 
   for (let i = 0; i < 5; i++) {
     res = await fetch(currentUrl, { headers, redirect: "manual" });
@@ -331,7 +367,9 @@ export async function downloadImageToBuffer(url) {
       const location = res.headers.get("location");
       if (!location) break;
       currentUrl = location;
-      console.log(`    Redirect ${i + 1} -> ${new URL(currentUrl).hostname}...`);
+      console.log(
+        `    Redirect ${i + 1} -> ${new URL(currentUrl).hostname}...`
+      );
       continue;
     }
     break;
@@ -345,15 +383,17 @@ export async function downloadImageToBuffer(url) {
 }
 
 // High-level orchestrator: generate images from a prompt and optional image buffers
-// imageBuffers: array of { buffer: Buffer, fileName: string, mimeType: string }
-export async function generateImages(prompt, imageBuffers = []) {
+export async function generateImages(
+  prompt: string,
+  imageBuffers: Array<{ buffer: Buffer; fileName: string; mimeType: string }> = []
+): Promise<ParsedResponse> {
   const { at, bl, fSid, pushId, clientPctx } = await getSessionTokens();
   const cookies = getCookieString();
   const clientUuid = randomUUID().toUpperCase();
   const reqId = Math.floor(100000 + Math.random() * 900000) * 100;
 
   // Upload input images if provided
-  const attachments = [];
+  const attachments: UploadedImage[] = [];
   for (const img of imageBuffers) {
     const uploaded = await uploadImageBuffer(
       img.buffer,
@@ -402,7 +442,9 @@ export async function generateImages(prompt, imageBuffers = []) {
 
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(`Request failed: HTTP ${res.status}\n${text.slice(0, 500)}`);
+    throw new Error(
+      `Request failed: HTTP ${res.status}\n${text.slice(0, 500)}`
+    );
   }
 
   console.log("Streaming response received. Parsing...\n");

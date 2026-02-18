@@ -4,3 +4,4 @@ output/
 debug_response.txt
 *.har
 .chrome-profile/
+dist/
