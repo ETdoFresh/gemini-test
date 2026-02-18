@@ -7,7 +7,7 @@ export interface GeneratedImage {
   filename: string;
   mime: string;
   dimensions: number[] | null;
-  base64: string;
+  url: string;
   imageToken: string | null;
   responseChunkId: string | null;
 }
@@ -23,7 +23,7 @@ export interface GenerateResult {
 }
 
 export interface UpscaleResult {
-  base64: string;
+  url: string;
   mime: string;
   bytes: number;
 }

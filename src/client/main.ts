@@ -90,19 +90,16 @@ async function handleGenerate() {
 
     // Add images to grid (newest first)
     for (const img of data.images) {
-      const blob = base64ToBlob(img.base64, img.mime);
-      const url = URL.createObjectURL(blob);
-
       const tile = document.createElement("div");
       tile.className = "tile";
       tile.addEventListener("click", (e) => {
         // Don't open image if clicking the upscale button
         if ((e.target as HTMLElement).closest(".upscale-btn")) return;
-        window.open(url, "_blank");
+        window.open(img.url, "_blank");
       });
 
       const imgEl = document.createElement("img");
-      imgEl.src = url;
+      imgEl.src = img.url;
       imgEl.alt = img.filename;
 
       const overlay = document.createElement("div");
@@ -166,16 +163,12 @@ function createUpscaleBtn(
       });
 
       // Replace the preview with the full-size image
-      const blob = base64ToBlob(result.base64, result.mime);
-      const newUrl = URL.createObjectURL(blob);
-      const oldUrl = imgEl.src;
-      imgEl.onload = () => URL.revokeObjectURL(oldUrl);
-      imgEl.src = newUrl;
+      imgEl.src = result.url;
 
       // Update the tile click handler to open the full-size image
       tile.onclick = (ev) => {
         if ((ev.target as HTMLElement).closest(".upscale-btn")) return;
-        window.open(newUrl, "_blank");
+        window.open(result.url, "_blank");
       };
 
       // Update overlay with file size
@@ -197,13 +190,6 @@ function createUpscaleBtn(
   });
 
   return btn;
-}
-
-function base64ToBlob(b64: string, mime: string): Blob {
-  const bytes = atob(b64);
-  const arr = new Uint8Array(bytes.length);
-  for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
-  return new Blob([arr], { type: mime });
 }
 
 function showToast(msg: string) {

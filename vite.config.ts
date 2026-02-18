@@ -17,6 +17,10 @@ export default defineConfig({
         target: "http://localhost:3000",
         changeOrigin: true,
       },
+      "/tmp/": {
+        target: "http://localhost:3000",
+        changeOrigin: true,
+      },
     },
   },
 });

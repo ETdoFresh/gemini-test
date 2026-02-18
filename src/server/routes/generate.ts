@@ -1,5 +1,8 @@
 import { Router } from "express";
 import multer from "multer";
+import fs from "fs";
+import path from "path";
+import crypto from "crypto";
 import { hasCookies } from "../lib/cookies.js";
 import { tryRestoreSession } from "../lib/auth.js";
 import {
@@ -11,6 +14,8 @@ import {
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
+const TMP_DIR = path.join(process.cwd(), "tmp");
+fs.mkdirSync(TMP_DIR, { recursive: true });
 
 // Middleware to ensure cookies are available
 async function ensureAuth(_req: any, res: any, next: any) {
@@ -48,18 +53,21 @@ router.post("/generate", upload.array("images", 10), ensureAuth, async (req, res
 
     const result = await generateImages(prompt, imageBuffers);
 
-    // Download only PNG images as 1K previews
+    // Download only PNG images as 1K previews, save to tmp/
     const pngImages = result.images.filter((img) => img.mime === "image/png");
     const images = [];
     for (const img of pngImages) {
       try {
         const buf = await downloadImageToBuffer(img.url);
+        const id = crypto.randomUUID();
+        const ext = img.mime === "image/png" ? ".png" : ".jpg";
+        const savedName = `${id}${ext}`;
+        fs.writeFileSync(path.join(TMP_DIR, savedName), buf);
         images.push({
           filename: img.filename,
           mime: img.mime,
           dimensions: img.dimensions,
-          base64: buf.toString("base64"),
-          // Include upscale metadata so the client can request full-size later
+          url: `/tmp/${savedName}`,
           imageToken: img.imageToken,
           responseChunkId: img.responseChunkId,
         });
@@ -112,8 +120,11 @@ router.post("/upscale", ensureAuth, async (req, res) => {
     );
 
     const buf = await downloadImageToBuffer(fullSizeUrl);
+    const id = crypto.randomUUID();
+    const savedName = `${id}.png`;
+    fs.writeFileSync(path.join(TMP_DIR, savedName), buf);
     res.json({
-      base64: buf.toString("base64"),
+      url: `/tmp/${savedName}`,
       mime: "image/png",
       bytes: buf.length,
     });
