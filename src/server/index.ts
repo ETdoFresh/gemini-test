@@ -16,6 +16,9 @@ const app = express();
 const clientDir = path.join(__dirname, "..", "client");
 app.use(express.static(clientDir));
 
+// Parse JSON request bodies
+app.use(express.json());
+
 // API routes
 app.use("/api", authRouter);
 app.use("/api", generateRouter);

@@ -2,33 +2,18 @@ import { Router } from "express";
 import multer from "multer";
 import { hasCookies } from "../lib/cookies.js";
 import { tryRestoreSession } from "../lib/auth.js";
-import { generateImages, downloadImageToBuffer } from "../lib/gemini.js";
+import {
+  generateImages,
+  downloadImageToBuffer,
+  requestFullSizeUrl,
+  getSessionTokens,
+} from "../lib/gemini.js";
 
 const router = Router();
 const upload = multer({ storage: multer.memoryStorage() });
 
-// POST /api/generate — generate images
-router.post("/generate", upload.array("images", 10), async (req, res) => {
-  const rawPrompt = req.body?.prompt;
-  if (!rawPrompt) {
-    return res.status(400).json({ error: "Missing 'prompt' field" });
-  }
-
-  // Build prompt with image settings
-  const aspectRatio = req.body?.aspectRatio;
-  const resolution = req.body?.resolution;
-  const settings: string[] = [];
-  if (aspectRatio) settings.push(`Use a ${aspectRatio} aspect ratio`);
-  if (resolution === "2048") {
-    settings.push("Output the image at 2K resolution (2048×2048 pixels)");
-  } else if (resolution === "1024") {
-    settings.push("Output the image at 1K resolution (1024×1024 pixels)");
-  }
-  const prompt = settings.length > 0
-    ? `${rawPrompt}. ${settings.join(". ")}.`
-    : rawPrompt;
-
-  // If no cookies in memory, try restoring from Chrome profile
+// Middleware to ensure cookies are available
+async function ensureAuth(_req: any, res: any, next: any) {
   if (!hasCookies()) {
     const restored = await tryRestoreSession();
     if (!restored) {
@@ -37,6 +22,20 @@ router.post("/generate", upload.array("images", 10), async (req, res) => {
         .json({ error: "Not authenticated. Call GET /api/login first." });
     }
   }
+  next();
+}
+
+// POST /api/generate — generate images (always returns 1K previews)
+router.post("/generate", upload.array("images", 10), ensureAuth, async (req, res) => {
+  const rawPrompt = req.body?.prompt;
+  if (!rawPrompt) {
+    return res.status(400).json({ error: "Missing 'prompt' field" });
+  }
+
+  const aspectRatio = req.body?.aspectRatio;
+  const prompt = aspectRatio
+    ? `${rawPrompt}. Use a ${aspectRatio} aspect ratio.`
+    : rawPrompt;
 
   try {
     const imageBuffers = ((req.files as Express.Multer.File[]) || []).map(
@@ -49,7 +48,7 @@ router.post("/generate", upload.array("images", 10), async (req, res) => {
 
     const result = await generateImages(prompt, imageBuffers);
 
-    // Download only PNG images and return as base64
+    // Download only PNG images as 1K previews
     const pngImages = result.images.filter((img) => img.mime === "image/png");
     const images = [];
     for (const img of pngImages) {
@@ -60,6 +59,9 @@ router.post("/generate", upload.array("images", 10), async (req, res) => {
           mime: img.mime,
           dimensions: img.dimensions,
           base64: buf.toString("base64"),
+          // Include upscale metadata so the client can request full-size later
+          imageToken: img.imageToken,
+          responseChunkId: img.responseChunkId,
         });
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : "Unknown error";
@@ -73,11 +75,51 @@ router.post("/generate", upload.array("images", 10), async (req, res) => {
         conversationId: result.conversationId,
         responseId: result.responseId,
         modelName: result.modelName,
+        prompt: rawPrompt,
       },
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
     console.error("Generation error:", err);
+    res.status(500).json({ error: message });
+  }
+});
+
+// POST /api/upscale — download full-size (2K) image via c8o8Fe RPC
+router.post("/upscale", ensureAuth, async (req, res) => {
+  const { imageToken, responseChunkId, conversationId, responseId, prompt } =
+    req.body || {};
+
+  if (!imageToken || !responseChunkId || !conversationId || !responseId) {
+    return res.status(400).json({ error: "Missing upscale metadata" });
+  }
+
+  try {
+    const tokens = await getSessionTokens();
+    const fullSizeUrl = await requestFullSizeUrl(
+      {
+        url: "",
+        filename: "upscale",
+        mime: "image/png",
+        dimensions: null,
+        imageToken,
+        responseChunkId,
+      },
+      prompt || "",
+      conversationId,
+      responseId,
+      tokens
+    );
+
+    const buf = await downloadImageToBuffer(fullSizeUrl);
+    res.json({
+      base64: buf.toString("base64"),
+      mime: "image/png",
+      bytes: buf.length,
+    });
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : "Unknown error";
+    console.error("Upscale error:", message);
     res.status(500).json({ error: message });
   }
 });

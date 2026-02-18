@@ -1,5 +1,5 @@
 import "./style.css";
-import { checkAuth, doLogin, generate } from "./api";
+import { checkAuth, doLogin, generate, upscale, type GeneratedImage } from "./api";
 
 const grid = document.getElementById("image-grid")!;
 const emptyState = document.getElementById("empty-state")!;
@@ -12,7 +12,6 @@ const authBanner = document.getElementById("auth-banner")!;
 const loginBtn = document.getElementById("login-btn")!;
 const toast = document.getElementById("toast")!;
 const aspectRatioSelect = document.getElementById("aspect-ratio") as HTMLSelectElement;
-const resolutionSelect = document.getElementById("resolution") as HTMLSelectElement;
 
 let generating = false;
 
@@ -78,8 +77,7 @@ async function handleGenerate() {
     const data = await generate(
       prompt,
       fileInput.files,
-      aspectRatioSelect.value || undefined,
-      resolutionSelect.value || undefined
+      aspectRatioSelect.value || undefined
     );
 
     if (!data.images || data.images.length === 0) {
@@ -97,7 +95,11 @@ async function handleGenerate() {
 
       const tile = document.createElement("div");
       tile.className = "tile";
-      tile.addEventListener("click", () => window.open(url, "_blank"));
+      tile.addEventListener("click", (e) => {
+        // Don't open image if clicking the upscale button
+        if ((e.target as HTMLElement).closest(".upscale-btn")) return;
+        window.open(url, "_blank");
+      });
 
       const imgEl = document.createElement("img");
       imgEl.src = url;
@@ -112,6 +114,13 @@ async function handleGenerate() {
 
       tile.appendChild(imgEl);
       tile.appendChild(overlay);
+
+      // Add upscale button if the image has upscale metadata
+      if (img.imageToken && img.responseChunkId && data.metadata.conversationId && data.metadata.responseId) {
+        const btn = createUpscaleBtn(img, data.metadata as any, imgEl, tile);
+        tile.appendChild(btn);
+      }
+
       grid.prepend(tile);
     }
 
@@ -128,6 +137,66 @@ async function handleGenerate() {
     submitBtn.removeAttribute("disabled");
     submitBtn.innerHTML = "&#10148;";
   }
+}
+
+function createUpscaleBtn(
+  img: GeneratedImage,
+  metadata: { conversationId: string; responseId: string; prompt: string },
+  imgEl: HTMLImageElement,
+  tile: HTMLDivElement
+): HTMLButtonElement {
+  const btn = document.createElement("button");
+  btn.className = "upscale-btn";
+  btn.textContent = "2K";
+
+  btn.addEventListener("click", async (e) => {
+    e.stopPropagation();
+    if (btn.classList.contains("done") || btn.hasAttribute("disabled")) return;
+
+    btn.setAttribute("disabled", "");
+    btn.textContent = "Upscaling...";
+
+    try {
+      const result = await upscale({
+        imageToken: img.imageToken!,
+        responseChunkId: img.responseChunkId!,
+        conversationId: metadata.conversationId,
+        responseId: metadata.responseId,
+        prompt: metadata.prompt,
+      });
+
+      // Replace the preview with the full-size image
+      const blob = base64ToBlob(result.base64, result.mime);
+      const newUrl = URL.createObjectURL(blob);
+      const oldUrl = imgEl.src;
+      imgEl.onload = () => URL.revokeObjectURL(oldUrl);
+      imgEl.src = newUrl;
+
+      // Update the tile click handler to open the full-size image
+      tile.onclick = (ev) => {
+        if ((ev.target as HTMLElement).closest(".upscale-btn")) return;
+        window.open(newUrl, "_blank");
+      };
+
+      // Update overlay with file size
+      const overlay = tile.querySelector(".overlay");
+      if (overlay) {
+        const sizeMB = (result.bytes / 1024 / 1024).toFixed(1);
+        overlay.textContent = `${img.filename} \u2022 2K \u2022 ${sizeMB} MB`;
+      }
+
+      btn.textContent = "2K \u2713";
+      btn.classList.add("done");
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Upscale failed";
+      showToast(message);
+      btn.textContent = "2K";
+    } finally {
+      btn.removeAttribute("disabled");
+    }
+  });
+
+  return btn;
 }
 
 function base64ToBlob(b64: string, mime: string): Blob {

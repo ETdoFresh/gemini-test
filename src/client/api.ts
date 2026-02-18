@@ -8,6 +8,8 @@ export interface GeneratedImage {
   mime: string;
   dimensions: number[] | null;
   base64: string;
+  imageToken: string | null;
+  responseChunkId: string | null;
 }
 
 export interface GenerateResult {
@@ -16,7 +18,14 @@ export interface GenerateResult {
     conversationId: string | null;
     responseId: string | null;
     modelName: string | null;
+    prompt: string;
   };
+}
+
+export interface UpscaleResult {
+  base64: string;
+  mime: string;
+  bytes: number;
 }
 
 export async function checkAuth(): Promise<AuthStatus> {
@@ -32,19 +41,36 @@ export async function doLogin(): Promise<{ success?: boolean; error?: string }> 
 export async function generate(
   prompt: string,
   files: FileList | null,
-  aspectRatio?: string,
-  resolution?: string
+  aspectRatio?: string
 ): Promise<GenerateResult> {
   const form = new FormData();
   form.append("prompt", prompt);
   if (aspectRatio) form.append("aspectRatio", aspectRatio);
-  if (resolution) form.append("resolution", resolution);
   if (files) {
     for (const file of files) {
       form.append("images", file);
     }
   }
   const res = await fetch("/api/generate", { method: "POST", body: form });
+  const data = await res.json();
+  if (!res.ok) {
+    throw new Error(data.error || `Error ${res.status}`);
+  }
+  return data;
+}
+
+export async function upscale(params: {
+  imageToken: string;
+  responseChunkId: string;
+  conversationId: string;
+  responseId: string;
+  prompt: string;
+}): Promise<UpscaleResult> {
+  const res = await fetch("/api/upscale", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
   const data = await res.json();
   if (!res.ok) {
     throw new Error(data.error || `Error ${res.status}`);
